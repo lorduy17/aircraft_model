@@ -518,11 +518,6 @@ def found_opt(Va_ideal,x_ideal,x_last,n_particles,options,iters,show=False):
 if __name__ == "__main__":
 
     ### Parametters for simulations:
-    time = 60*3 # s
-    dt = 0.005 # s
-
-
-    
     # - First simulate with 
     #       x = [85,0,0,0,0,0,0,0.10,0]
     #       u = [0,-0.1,0,0.8,0.8]
@@ -582,9 +577,9 @@ if __name__ == "__main__":
     x_ideal = [95,0,0,0,0,0,0,0,-np.pi]
     Va = 95
     options = {"c1":1.2 , "c2":1.8 , "w": 0.7}
-    n_particles = 40
+    n_particles = 30
     iters = 300
-    show = False
+    show = True
     x_last = x.copy()
 
     cost , U_opt = found_opt(Va,x_ideal,x_last,n_particles=n_particles,iters=iters,options=options,show=show)
