@@ -1,5 +1,4 @@
-
-    #%%
+#%%
 import numpy as np
 import pyswarms as ps
 import matplotlib.pyplot as plt
@@ -68,13 +67,13 @@ def x_dot(state_var, control_var):
     # Aircraft parameters
     m = 120e3 # kg
     innertia_body = m* np.array([
-        [40.07,0,2.098],
+        [40.07,0,-2.098],
         [0,64,0],
-        [2.098,0,99.92]
+        [-2.098,0,99.92]
     ])
 
     s = 260 # m2
-    mac = 4.2 # m
+    mac = 6.6 # m
     x_apt1 = 0
     y_apt1 = 7.94
     z_apt1 = 1.9
@@ -85,16 +84,16 @@ def x_dot(state_var, control_var):
     # STEP 3
     ## Nondimensional Aero Forces coefficientes in Fs
     alpha0 = -11.5/180*np.pi # rad
-    if alpha <= 14.5/180*np.pi:
-        
-        cl_wb = 5.5*(alpha-alpha0)
+    n = 5.5
+
+    if alpha <= 14.5/180*np.pi:  
+        cl_wb = n*(alpha-alpha0)
     else:
         a1 = -155.2
         a2 = 609.2
         a3 = -768.5
         a0 = 15.212
         cl_wb = a0 + a1*alpha + a2*alpha**2 + a3*alpha**3
-
 
     # Tail
     s_t = 64 # m2
@@ -103,10 +102,11 @@ def x_dot(state_var, control_var):
     epsilon = deda*(alpha -alpha0)
     alpha_t = alpha-epsilon+u2+1.3*x5*l_t/Va
     cl_t = s_t/s*3.1*alpha_t
-    cl = cl_wb+cl_t
+    
 
     # Forces
-    c_d = 0.13+0.0061*(cl_wb-0.45)**2
+    cl = cl_wb+cl_t
+    c_d = 0.13+0.0061*(n*alpha+0.645)**2
     c_y = -1.6*beta+0.24*u3
     
 
@@ -133,10 +133,10 @@ def x_dot(state_var, control_var):
 
     n_bar = np.array([
         -1.4*beta,
-        -0.59-3.1*s_t*l_t/(s*mac)*(alpha-epsilon),
+        -0.59-(3.1*s_t*l_t)/(s*mac)*(alpha-epsilon),
         (1-alpha*180/(np.pi*15))*beta
     ])
-    cm_x = np.array([
+    cm_x = mac/Va*np.array([
         [-11,0,5],
         [0,-4.03*s_t*l_t**2/(s*mac**2),0],
         [1.7,0,-11.5]
@@ -148,7 +148,7 @@ def x_dot(state_var, control_var):
     ])
 
 
-    cm_ac = n_bar +cm_x@(mac/Va*angle_rates)+cm_u@[u1,u2,u3]
+    cm_ac = n_bar +cm_x@(angle_rates)+cm_u@[u1,u2,u3]
     moments_ac = mac*cm_ac*Q*s
     
     # STEP 7
@@ -163,9 +163,9 @@ def x_dot(state_var, control_var):
 
     # STEP 8
     ## Propulsion effects
-    F_trust_max_per_engine = 0.175*m*g # N
-    f1 = u4*F_trust_max_per_engine
-    f2 = u5*F_trust_max_per_engine
+ # N
+    f1 = min(u4*m*g, 0.175*m*g)  # ← Restaurar
+    f2 = min(u5*m*g, 0.175*m*g)
 
     """Define parammetters (u_bar1,u_bar2) for the propulsion effects"""
     
@@ -175,12 +175,14 @@ def x_dot(state_var, control_var):
         x_apt1,
         y_apt1,
         z_apt1
-    ])
+])
+    u_bar1 = u_bar1 - r_cg
     u_bar2 = np.array([
         x_apt2,
         y_apt2,
         z_apt2
     ])
+    u_bar2 = u_bar2 - r_cg
 
     
     m_ecg = np.cross(u_bar1,[f1,0,0]) + np.cross(u_bar2,[f2,0,0])
@@ -213,7 +215,7 @@ def x_dot(state_var, control_var):
 
     return x_dot_r
 
-def simulate(X,U,time,dt,da,eg):
+def simulate(X,U,time,dt,da=False,eg=False):
     """
 
     The function simnulate the behavior of the A/C (aircraft) with
@@ -247,10 +249,14 @@ def simulate(X,U,time,dt,da,eg):
     x_current = X.copy()
     U_initial = U.copy()
 
+    
+    strs = " Started simulation "
+    print(
+        f"~"*50,"\n",
+        f"-"*10,strs
+    )
+        
     iter_fail = None
-
-    print("Starting simulation...")
-
 
     while counter_time <= time:
 
@@ -262,11 +268,11 @@ def simulate(X,U,time,dt,da,eg):
                 U[0] += da*deg2rad # rad
         
         if eg is not None:
-            if counter_time > 60:
-                if eg == 1:
-                    U[3] = 0 # shut off engine 1
-                elif eg == 2:
-                    U[4] = 0 # shut off engine 2
+        
+            if eg == 1:
+                U[3] = 0 # shut off engine 1
+            elif eg == 2:
+                U[4] = 0 # shut off engine 2
             
 
 
@@ -277,7 +283,7 @@ def simulate(X,U,time,dt,da,eg):
         Va = np.sqrt(x_next[0]**2 + x_next[1]**2 + x_next[2]**2)
         if Va > 300 or np.any(np.abs(x_next[6:9]) > np.pi/2):
 
-            iter_fail = [iter_counter, counter_time]
+            iter_fail = True
 
             
 
@@ -288,39 +294,42 @@ def simulate(X,U,time,dt,da,eg):
         counter_time += dt
         iter_counter += 1
 
-
-    print("iterations: ",iter_counter)
-    print("Time simulated: ",counter_time," s")
-    if iter_fail is not None:
-        print("Simulation can not converge in iteration",iter_fail[0]," and time ",iter_fail[1]," s")
-
-    print("Simulation finished")
+        if iter_counter%5000 == 0:
+            print(
+        f"Simulation: {round((counter_time/time)*100,2)}%","\t", f"time simulated: {round(counter_time,0)}s"
+        )
+    
+        if iter_fail is not None:
+            if iter_counter%2500 == 0:
+                print(50*"*","\n")
+                print(17*"~","WARNING")
+                print("Simulation can not converge\n ")
+                print(f"Simulation: {round((counter_time/time)*100,2)}%","\t",f"time: {round(counter_time,0)}s")
+    print(
+    f"-"*10," Simulation finished","\n",
+    f"~"*50
+    )
     states = np.array(states)
 
     ## Plotter
+    fig, axs = plt.subplots(9, 1, figsize=(10, 15), sharex=True)
+    labels_y = ["u, m/s", "v, m/s", "w, m/s", "p, rad/s", "q, rad/s", "r, rad/s", "phi, rad", "theta, rad", "psi, rad"]
+    
 
-    labels_y  = ["u, m/s", "v, m/s", "w, m/s", "p, rad/s", "q, rad/s", "r, rad/s", "phi, rad", "theta, rad", "psi, rad"]
-    subtitle = ["Body Speeds","Angle Rates","Euler Angles"]
+    for i in range(9):
+        axs[i].plot(time_vector, states[:,i], label=labels_y[i],)
+        axs[i].legend()
+        axs[i].grid(True)
+        if i == 8:  # Last subplot
+            axs[i].set_xlabel('Time (s)')
+    
+    plt.tight_layout()
+    plt.show(block=True)
 
-    var = 0
+    return states
 
-    for i in range(3):
-        fig, axs = plt.subplots(3,sharex = True)
-        for j in range(3):
-            axs[j].plot(time_vector,states[:,var])
-            axs[j].set_ylabel(labels_y[var])
-            axs[j].grid()
-            var += 1
-        axs[2].set_xlabel("Time, s")
-        fig.suptitle(subtitle[i])
-        
-        
-    plt.show()
-    return states[:,iter_counter-1]
-
-def cost_function(Va_ideal,x_ideal,x_current,U_current):
+def cost_function(Va_ideal,x_ideal,x_last,U_current=None):
     """
-
     The function calc the cost function for the state desiered
 
     x_ideal: state vector where we want to evaluate the cost,
@@ -339,69 +348,195 @@ def cost_function(Va_ideal,x_ideal,x_current,U_current):
     deg2rad = np.pi/180
 
     # Current vars 
-    xdot_current = x_dot(x_current,U_current)
-    phi_current = x_current[6]
-    psi_current = x_current[8]
-    Va_current = np.sqrt(x_current[0]**2,x_current[1]**2,x_current[2]**2)
-    climb_angle_current = x_current[7] - np.arctan2(x_current[0]/x_current[2])
+    xdot_current = x_dot(x_last,U_current)
+    euler_angle_current = x_last[6:]
+    Va_current = np.linalg.norm(x_last[0:3])
+    if Va_ideal == None:
+        Va_ideal = np.linalg.norm(x_ideal[0:3])
+    alpha_current = np.arctan2(x_last[2], x_last[0])
+    climb_angle_current = euler_angle_current[1] - alpha_current
+
+    
 
     # Erros calcs
-    error_xdot = x_ideal-xdot_current
+    error_dynamic = xdot_current
     error_Va = Va_ideal - Va_current
-    error_climb_angle = - climb_angle_current
-    error_psi = -psi_current
-    error_phi = -phi_current
+    error_climb_angle = climb_angle_current
+    error_psi = x_ideal[8] - x_last[8]
+    error_phi = x_ideal[6] - x_last[6]
     
-    error_vector = error_xdot
-    error_vector.append(error_Va)
-    error_vector.append(error_climb_angle)
-    error_vector.append(error_psi)
-    error_vector.append(error_phi)
-#%%
+    error_vector = np.hstack((
+        
+        error_dynamic,
+        error_Va,
+        error_climb_angle,
+        error_psi,
+        error_phi
+    ))
+
     # Scaling factors
     scaling_factor_vector = np.array([
-        1,1,1,                          # body accelaration (ba) [m/s^2]
-        0.1,0.1,0.1,                    # angles accelarations (ac) [rad/s^2]
-        0.1,0.1,0.1,                    # angle rates ar [rad/s]
-        1,                              # Va error [m/s]
-        0.01,                           # Climb angle (gamma) [rad]
-        0.1,                            # psi [rad]
-        0.05                            # pho [rad]
+        
+        10,10,10,                   # body accelaration (ba) [m/s^2]
+        1,1,1,                      # angles accelarations (ac) [rad/s^2]
+        0.2,0.2,0.2,                # eangs]
+        10,                         # Va error [m/le (gamma) [rad]
+        0.1,                        # Climb angle rates ar [rad/s]
+        10,                         # psi [rad]
+        0.3                         # pho [rad]
     ])
 
     # Weight importance
     weight_vector = np.array([
+        
         50,50,50,                       # ba: important
-        150,150,150,                    # ac: very important, is to sensible with stability
-        50,50,50,                       # ar: moderate
-        200,                            # Va: Very important, is the base of forces and accelerations of system
-        100,                            # gamma: Important, need equal 0 for keep the atitude
-        150,                            # psi: important, keep hading
-        100                             # phi: important
+        80,100,80,                      # ac: very important, is to sensible with stability
+        30,30,30,                       # ar: moderate
+        120,                            # Va: Very important, is the base of forces and accelerations of system
+        60,                             # gamma: Important, need equal 0 for keep the atitude
+        40,                             # psi: important, keep hading
+        40                              # phi: important
 ])
-#%%
-    # cost calc
-    norm = (error_vector/scaling_factor_vector)**2
-    J_terms = weight_vector*norm
-    J = np.sum(J_terms)
-
+    
+    error_scaling_sq = (error_vector / scaling_factor_vector)**2
+    J = np.sum(weight_vector * error_scaling_sq)
+    
     return J
 
 
 
+def found_opt(Va_ideal,x_ideal,x_last,n_particles,options,iters,show=False):
+    """
+    Function search the optimal configuration of control for state ideal
+
+    Parametters:
+
+    n_partocles: Number of particles searching optimal point
+    Dimensions: In this case are control vars, dimensions = 5
+    options = [c1,c2,w]
+    iter: Number of iterations.
+    
+    c1: cognitive weight [0,2]
+    c2: social weight [0,2]
+    w: innertia 
+    """
+
+    x_last = np.array(x_last,dtype=float)
+    x_ideal = np.array(x_ideal,dtype=float)
+
+
+    def objective(U_vector):
+        dt = 0.1
+        t = 2
+        steps = max(1, int(t /dt))
+        n = U_vector.shape[0]
+        costs = np.full(n,np.inf,dtype=float)
+        for i, U in enumerate(U_vector):
+            x_temp = x_last.copy()
+            for _ in range(steps):
+                x_temp = x_temp + x_dot(x_temp,U)*dt
+            costs[i] = cost_function(Va_ideal, x_ideal, x_temp, U)
+        return costs
+
+    
+    deg2rad = np.pi/180
+    
+    lower_bounds = [-25*deg2rad,-25*deg2rad,-25*deg2rad,0.5,0.5]
+    upper_bounds = [25*deg2rad,25*deg2rad,25*deg2rad,1,1]
+    bounds = (np.array(lower_bounds),np.array(upper_bounds))
+
+    optimizer = ps.single.GlobalBestPSO(
+        n_particles=n_particles,
+        dimensions=5,
+        options=options,
+        bounds=bounds
+    )
+
+    cost, U_opt = optimizer.optimize(objective,iters=iters,verbose=show)
+    x_dot_r = x_dot(x_ideal,U_opt)
+    Va_result = np.sqrt(x_ideal[0]**2+x_ideal[1]**2+x_ideal[2]**2)
+
+    print("~"*50)
+    print(f" xdor result:\t {x_dot_r}")
+    print(f" Va resurt:\t {Va_result}")
+
+
+    return cost, U_opt
+
+
 if __name__ == "__main__":
-    # Initial conditions
-    X0 = np.array([85,0,0,0,0,0,0,0.1,0]) # m/s , rad/s , rad
-    U0 = np.array([0,-0.1,0,0.8,0.8]) # deg , deg , deg , thrust
+
+    ### Parametters for simulations:
+
+    time = 60*3 # s
+    dt = 0.01 # s
+
+    # - First simulate for x = [85,0,0,0,0,0,0,0.10,0]
+    #       with u = [0,-0.1,0,0.8,0.8]
+    x,u = [85,0,0,0,0,0,0,0.10,0],[0,-0.1,0,0.8,0.8]
+    
+    
+    strs = " FIRST SIMULATION "
+
+    print(
+        f"_"*50,"\n",
+        f"-"*16,strs,"\n",
+        f"-"*10," Simulate normal fligth","\n",
+        f"-"*10,f" Simlate with: ","\n",
+        "-"*5,"x = [85,0,0,0,0,0,0,0.10,0]","\n",
+        "-"*5,"and","\n",
+        "-"*5,"u = [0,-0.1,0,0.8,0.8]"
+    )
+
+    simulate(x,u,time,dt)
+
+    # - Second simulate for:
+    #       first simulation adding
+    #       aleron deflection of 5°
+
+    da = 5*np.pi/180
+    strs = "SECOND SIMULATION"
+    
+    print(
+        f"_"*50,"\n",
+        f"-"*17,strs,"\n",
+        f"-"*5," Aleron deflected for 2 seconds \n",
+        f"-"*5," at 30 seconds of simulation",
+    )
+    
+    
+    simulate(x,u,time,dt,da=da)
+
+    print("_"*50)
+    print("-"*17," THIRD SIMULATION")
+    print("-"*5," Simulate a engine fail ")
     
 
-    # Simulation parameters
-    time = 60*3 # s
-    dt = 0.001 # s
+    eg = 2
 
-    eg = 0
-    da = 0 # deg
 
-    simulate(X0,U0,time,dt,da,eg)
+    simulate(x,u,time,dt,eg=eg)
 
-# %%
+    print("_"*50)
+    print("-"*17," FORTH SIMULATION")
+    print("-"*5," Found conditions for fliht trim")
+
+
+ 
+    x_ideal = [95,0,0,0,0,0,0,0,np.pi]
+    Va = 95
+    options = {"c1":1.2 , "c2":1.8 , "w": 0.7}
+    n_particles = 30
+    iters = 300
+
+    x_last = x.copy()
+
+    cost , U_opt = found_opt(Va,x_ideal,x_last,n_particles=n_particles,iters=iters,options=options,show=True)
+    print(U_opt,cost)
+
+    simulate(x_last,U_opt,time,dt)
+    
+
+# 
+
+    
